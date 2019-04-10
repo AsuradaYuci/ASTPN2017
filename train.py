@@ -58,6 +58,10 @@ class BaseTrainer(object):
             # img1 = netinputs0[0][0]
             # writer.add_image('image1', img1, i)
             # writer.close()
+            b = netinputs0.size(0)
+            s = netinputs0.size(1)
+            netinputs0 = netinputs0.view(b*s, netinputs0.size(2), netinputs0.size(3), netinputs0.size(4))
+            netinputs1 = netinputs1.view(b*s, netinputs1.size(2), netinputs1.size(3), netinputs1.size(4))
 
             loss = self._forward(netinputs0, netinputs1, targets)  # 1.前向传播
 

@@ -49,22 +49,28 @@ class Evaluator(object):
         # qf_raw = []
 
         for i, inputs in enumerate(data_loader):
+            feature = []
             imgs, _, _ = inputs
             b, n, s, c, h, w = imgs.size()  # torch.Size([9, 16, 5, 256, 128])
             imgs = imgs.view(b*n, s, c, h, w)
             imgs = to_torch(imgs)  # torch.Size([9, 16, 5, 256, 128])
+            imgseq_len = imgs.size(0)
 
             device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-            imgs = imgs.to(device)
+
             # flows = flows.to(device)
             with torch.no_grad():
-                out_feat, _, _, _ = self.cnn_model(imgs, imgs)
-                allfeatures = out_feat.view(n, -1)  # torch.Size([9, 128])
-                # allfeatures_raw = out_raw.view(n, -1)  # torch.Size([9, 128])
-                allfeatures = torch.mean(allfeatures, 0).data.cpu()  # 汇总一个序列特征,取平均  128
-                # allfeatures_raw = torch.mean(allfeatures_raw, 0).data
-                qf.append(allfeatures)
-                # qf_raw.append(allfeatures_raw)
+                for i in range(imgseq_len):
+                    img = imgs[i].to(device)  # torch.Size([16, 5, 256, 128])
+                    out_feat, _, _, _ = self.cnn_model(img, img)  # [1, 128]
+                    out_feat = out_feat.squeeze().data.cpu()
+                    feature.extend(out_feat)
+            features = np.array(feature)
+            features = features.reshape(imgseq_len, -1)
+            features = np.average(features, 0)
+            # allfeatures = features.tolist()
+            allfeatures = torch.from_numpy(features).unsqueeze(0)
+            qf.append(allfeatures)
         qf = torch.stack(qf)
         #    qf_raw = torch.stack(allfeatures_raw)
 

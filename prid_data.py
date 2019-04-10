@@ -115,7 +115,7 @@ def main(args):
 			trainer.train(epoch, train_loader, optimizer)
 
 			# 每隔几个epoch测试一次
-			if (epoch + 1) % 10 == 0 or (epoch + 1) == args.epochs:
+			if (epoch + 1) % 20 == 0 or (epoch + 1) == args.epochs:
 
 				top1 = evaluator.evaluate(query_loader, gallery_loader, dataset.queryinfo, dataset.galleryinfo)
 				is_best = top1 > best_top1
@@ -134,7 +134,7 @@ if __name__ == '__main__':
 	parser.add_argument('--seed', type=int, default=1)
 	# DATA
 	parser.add_argument('--dataset', type=str, default='prid2011', choices=['ilds', 'prid2011', 'mars'])
-	parser.add_argument('--batch-size', type=int, default=8, help='depend on your device')
+	parser.add_argument('--batch-size', type=int, default=1, help='depend on your device')
 	parser.add_argument('--workers', type=int, default=1)
 	parser.add_argument('--seq_len', type=int, default=16, help='the number of images in a sequence')
 	parser.add_argument('--seq_srd', type=int, default=16, help='采样间隔步长')
@@ -153,11 +153,11 @@ if __name__ == '__main__':
 	# Train
 	parser.add_argument('--start-epoch', type=int, default=0)
 	parser.add_argument('--epochs', type=int, default=400)
-	parser.add_argument('--evaluate', type=int, default=0, help='0 => train; 1 =>test')
+	parser.add_argument('--evaluate', type=int, default=1, help='0 => train; 1 =>test')
 	# Path
 	working_dir = osp.dirname(osp.abspath(__file__))
 	parser.add_argument('--dataset-dir', type=str, metavar='PATH', default=osp.join(working_dir, '../video_reid_mars/data'))
-	parser.add_argument('--logs-dir', type=str, metavar='PATH', default=osp.join(working_dir, 'log/futher_try'))
+	parser.add_argument('--logs-dir', type=str, metavar='PATH', default=osp.join(working_dir, 'log/astpn_of'))
 	args = parser.parse_args()
 	# main func
 	main(args)

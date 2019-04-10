@@ -29,6 +29,7 @@ class VideoDataset(Dataset):
 		return len(self.dataset)
 
 	def getOfPath(self, rgb_path):  # (一次1张图片)将图像转换为YUV，并且加入光流信息
+		# root_of = '/home/ying/Desktop/PRID/PRID2011-OF-HVP/multi_shot'
 		root_of = '/home/ying/Desktop/video_reid_mars/data/prid2011sequence/raw/prid2011flow/prid2011flow'
 		fname_list = rgb_path.split('/')
 		of_path = osp.join(root_of, fname_list[-3], fname_list[-2], fname_list[-1])  # 光流路径
@@ -122,15 +123,15 @@ class VideoDataset(Dataset):
 			while num - cur_index >= self.seq_len:  # 当序列总长度-当前索引 > 采样长度，则更新当前索引，一直遍历这个序列
 				indices_list.append(frame_indices[cur_index:cur_index+self.seq_len])
 				cur_index += self.seq_len  # 更新当前索引
-			last_seq = frame_indices[cur_index:]  # 最后一个索引不满足采样长度,补足最后一个
-			for index in last_seq:
-				if len(last_seq) >= self.seq_len:
-					break
-				last_seq.append(index)
-			if len(last_seq) == 0:
-				indices_list = indices_list
-			else:
-				indices_list.append(last_seq)  # 加上最后一个采样长度
+			# last_seq = frame_indices[cur_index:]  # 最后一个索引不满足采样长度,补足最后一个
+			# for index in last_seq:
+			# 	if len(last_seq) >= self.seq_len:
+			# 		break
+			# 	last_seq.append(index)
+			# if len(last_seq) == 0:
+			# 	indices_list = indices_list
+			# else:
+			# 	indices_list.append(last_seq)  # 加上最后一个采样长度
 
 			imgs_list = []
 			seq = []

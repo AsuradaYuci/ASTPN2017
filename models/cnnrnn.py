@@ -2,18 +2,21 @@
 # -*- coding:utf-8 -*-
 # @author = yuci
 # Date: 19-3-21 下午7:29
-"""CNN-RNN 网络架构  三层CNN
+"""一、CNN-RNN 网络架构  三层CNN
 1.第一层网络：16个卷积核，尺寸为5*5，步长为2；2*2最大池化；tanh激活函数
 2.第二层网络：64个卷积核，尺寸为5*5，步长为2；2*2最大池化；tanh激活函数
 3.第三层网络：64个卷积核，尺寸为5*5，步长为2；tanh激活函数
 4.0.5的dropout
 5.128个元素的FC全连接层
 
+二、空间金字塔池化 8*8，4*4,2*2,1*1
+
 """
 import torch
 import torch.nn as nn
 import numpy as np
 from torch.nn import functional as F
+from models.attention import *
 
 
 class Net(nn.Module):
@@ -42,13 +45,18 @@ class Net(nn.Module):
 		# 构建最大池化层
 		self.pooling1 = nn.MaxPool2d(self.poolsize[0], self.stepsize[0])
 		self.pooling2 = nn.MaxPool2d(self.poolsize[1], self.stepsize[1])
-		self.pooling3 = nn.MaxPool2d(self.poolsize[2], self.stepsize[2])
 
 		# tanh激活函数
 		self.tanh = nn.Tanh()
 
+		# 4个空间金字塔池化层
+		self.pool1 = nn.Sequential(nn.AdaptiveMaxPool2d((8, 8)))
+		self.pool2 = nn.Sequential(nn.AdaptiveMaxPool2d((4, 4)))
+		self.pool3 = nn.Sequential(nn.AdaptiveMaxPool2d((2, 2)))
+		self.pool4 = nn.Sequential(nn.AdaptiveMaxPool2d((1, 1)))
+
 		# FC层
-		n_fully_connected = 88608  # 根据图片尺寸修改
+		n_fully_connected = 32 * (8*8 + 4*4 + 2*2 + 1*1)  # 根据图片尺寸修改
 
 		self.seq2 = nn.Sequential(
 			nn.Dropout(self.dropout),
@@ -56,7 +64,17 @@ class Net(nn.Module):
 		)
 
 		# rnn层
-		self.rnn = nn.LSTM(input_size=self.num_features, hidden_size=self.num_features, num_layers=1, batch_first=True, dropout=self.dropout)
+		# self.rnn = nn.LSTM(input_size=self.num_features, hidden_size=self.num_features, num_layers=1, batch_first=True, dropout=self.dropout)
+
+		self.rnn = nn.RNN(input_size=self.num_features, hidden_size=self.num_features)
+		self.hid_weight = nn.Parameter(
+			nn.init.xavier_uniform_(torch.Tensor(1, self.seq_len, self.num_features).type(
+				torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
+			), gain=np.sqrt(2.0)), requires_grad=True)
+
+		# 注意力层
+		self.attention = Attention(self.num_features)
+		self.add_module('attention', self.attention)
 
 		# final full connectlayer
 		self.final_FC = nn.Linear(self.num_features, self.num_person_train)
@@ -67,33 +85,54 @@ class Net(nn.Module):
 			self.conv2, self.tanh, self.pooling2,
 			self.conv3, self.tanh,
 		)
-		b = input1.size(0)  # batch的大小    # 测试时为片段的长度
-		n = input1.size(1)  # 1个batch中图片的数目
-		input1 = input1.view(b*n, input1.size(2), input1.size(3), input1.size(4))  # 测试时torch.Size([144, 5, 256, 128])
-		input2 = input2.view(b*n, input2.size(2), input2.size(3), input2.size(4))
-		inp1_seq1_out = seq1(input1).view(input1.size(0), -1)  # torch.Size([16, 32, 35, 19])
-		inp2_seq1_out = seq1(input2).view(input2.size(0), -1)  # 经过卷积层后的输出   torch.Size([256, 88608])
-		inp1_seq2_out = self.seq2(inp1_seq1_out).view(b, n, -1)
-		inp2_seq2_out = self.seq2(inp2_seq1_out).view(b, n, -1)  # 经过fc层的输出  torch.Size([16, 16, 128])
+		# b = input1.size(0)  # batch的大小    # 测试时为片段的长度
+		# n = input1.size(1)  # 1个batch中图片的数目
+		# input1 = input1.view(b*n, input1.size(2), input1.size(3), input1.size(4))  # 测试时torch.Size([144, 5, 256, 128])
+		# input2 = input2.view(b*n, input2.size(2), input2.size(3), input2.size(4))
+		inp1_seq1_out = seq1(input1)  # torch.Size([16, 32, 35, 19])
+		inp2_seq1_out = seq1(input2)  # 经过卷积层后的输出
+
+		inp1_spp_out = self.spatial_pooling(inp1_seq1_out)  # torch.Size([16, 2720])
+		inp2_spp_out = self.spatial_pooling(inp2_seq1_out)
+
+		inp1_seq2_out = self.seq2(inp1_spp_out).unsqueeze(0)  # torch.Size([1, 16, 128])
+		inp2_seq2_out = self.seq2(inp2_spp_out).unsqueeze(0)  # 经过fc层的输出  torch.Size([1, 16, 128])
 
 		inp1_rnn_out, hn1 = self.rnn(inp1_seq2_out)
-		inp2_rnn_out, hn2 = self.rnn(inp2_seq2_out)   #
-		inp1_rnn_out = inp1_rnn_out.view(b, n, -1)  # torch.Size([8, 16, 128])
-		inp2_rnn_out = inp2_rnn_out.view(b, n, -1)
-		inp1_rnn_out = inp1_rnn_out.permute(0, 2, 1)
-		inp2_rnn_out = inp2_rnn_out.permute(0, 2, 1)  # 8,128,16
+		inp2_rnn_out, hn2 = self.rnn(inp2_seq2_out)   # torch.Size([1, 16, 128])
+		feature_p = inp1_rnn_out.squeeze()  # torch.Size([16, 128])
+		feature_g = inp2_rnn_out.squeeze()
 
-		# 平均池化/最大池化
-		feature_p = F.max_pool1d(inp1_rnn_out, inp1_rnn_out.size(2))  # 序列特征 8, 128, 1
-		feature_g = F.max_pool1d(inp2_rnn_out, inp2_rnn_out.size(2))
-
-		feature_p = feature_p.view(b, self.num_features)  # 8,128
-		feature_g = feature_g.view(b, self.num_features)
+		feature_p, feature_g = self.attention(feature_p, feature_g)  # torch.Size([1, 128])
 
 		# 分类
-		identity_p = self.final_FC(feature_p)  # 身份特征 torch.Size([8, 89])
+		identity_p = self.final_FC(feature_p)  # 身份特征 torch.Size([1, 89])
 		identity_g = self.final_FC(feature_g)
 		return feature_p, feature_g, identity_p, identity_g
+
+	def spatial_pooling(self, inputs):
+		out1 = self.pool1(inputs)
+		out1_shape = out1.shape  # torch.Size([128, 32, 8, 8])
+		sec1_dim = out1_shape[-1] * out1_shape[-2] * out1_shape[-3]  # 2048
+		out1 = out1.contiguous().view(-1, sec1_dim)  # torch.Size([128, 2048])
+
+		out2 = self.pool2(inputs)
+		out2_shape = out2.shape  # torch.Size([128, 32, 4, 4])
+		sec2_dim = out2_shape[-1] * out2_shape[-2] * out2_shape[-3]  # 512
+		out2 = out2.contiguous().view(-1, sec2_dim)  # torch.Size([128, 512])
+
+		out3 = self.pool3(inputs)
+		out3_shape = out3.shape  # torch.Size([128, 32, 2, 2])
+		sec3_dim = out3_shape[-1] * out3_shape[-2] * out3_shape[-3]  # 128
+		out3 = out3.contiguous().view(-1, sec3_dim)  # torch.Size([128, 128])
+
+		out4 = self.pool4(inputs)
+		out4_shape = out4.shape  # torch.Size([128, 32, 1, 1])
+		sec4_dim = out4_shape[-1] * out4_shape[-2] * out4_shape[-3]  # 32
+		out4 = out4.contiguous().view(-1, sec4_dim)  # torch.Size([128, 32])
+
+		outputs = torch.cat((out1, out2, out3, out4), 1)  # torch.Size([128, 2720])
+		return outputs
 
 	def forward(self, input1, input2):
 		feature_p, feature_g, identity_p, identity_g = self.build_net(input1, input2)
@@ -117,27 +156,34 @@ class Criterion(nn.Module):
 		self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 	def forward(self, feature_p, feature_g, identity_p, identity_g, target):
+		log_soft = nn.LogSoftmax(1)
+		lsoft_p = log_soft(identity_p)
+		lsoft_g = log_soft(identity_g)
+
 		dist = nn.PairwiseDistance(p=2)
 		pair_dist = dist(feature_p, feature_g)  # 欧几里得距离
 
 		# 1.折页损失
 		hing = nn.HingeEmbeddingLoss(margin=self.hinge_margin, reduce=False)
-		label0 = target[0].to(self.device)
+		label0 = torch.tensor(target[0]).type(
+			torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor)
 		hing_loss = hing(pair_dist, label0)
 
 		# 2.交叉熵损失
-		nll = nn.CrossEntropyLoss()
-		label1 = target[1].to(self.device)
-		label2 = target[2].to(self.device)
-		loss_p = nll(identity_p, label1)
-		loss_g = nll(identity_g, label2)
+		nll = nn.NLLLoss()
+		label1 = torch.tensor([target[1]]).type(
+			torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor)
+		label2 = torch.tensor([target[2]]).type(
+			torch.cuda.LongTensor if torch.cuda.is_available() else torch.LongTensor)
+		loss_p = nll(lsoft_p, label1)
+		loss_g = nll(lsoft_g, label2)
 
 		# 3.损失求和
 		total_loss = hing_loss + loss_p + loss_g
-		mean_loss = torch.mean(total_loss)
+		# mean_loss = torch.mean(total_loss)
 		# loss = torch.sum(total_loss)
 
-		return mean_loss
+		return total_loss
 
 
 
